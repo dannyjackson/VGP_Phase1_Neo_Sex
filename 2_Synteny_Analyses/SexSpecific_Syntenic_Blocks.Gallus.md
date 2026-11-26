@@ -3,13 +3,6 @@
 ## Run after SexShared_Syntenic_Blocks.md
 
 # Run genespace with the whole genomes 
-## Make reference list of sex limited chrs
-```
-PROJDIR=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/
-awk -F',' 'NR>1 && $2 ~ /^(Y|W)/ {print $1 "\t" $2}' \
-  ${PROJDIR}/referencelists/sexchrom_accessions.with_gff.csv \
-  > ${PROJDIR}/referencelists/species.sexlimited.for_genespace_array.tsv
-```
 ## Remove X and Z chromosomes from bed files
 ```
 source myconda
@@ -202,16 +195,17 @@ grep -n '\.38\.pdf'   ${YW}/scripts/genespace.synteny_to_chicken.wholegenome.sex
 
 set -euo pipefail
 
-PAIRFILE=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexchr.for_genespace_array.csv
+PAIRFILE=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexlimited.unique.txt
 SCRIPT=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/scripts/genespace.synteny_to_chicken.wholegenome.r
 OUTDIR=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/all/plots
 
-# Grab the Nth line (array index) and parse "Species Chromosome"
+# Grab the Nth species (array index) and parse "Species Chromosome"
 line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${PAIRFILE}")
 SPECIES=$(awk '{print $1}' <<< "${line}")
 WORKDIR=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/all/genespace/${SPECIES}
 
 export WORKING_DIR="${WORKDIR}"
+export GS_BLKSIZE=5   # set to 3 if W/Y form no blocks
 
 cd "${OUTDIR}"
 
@@ -246,9 +240,14 @@ mkdir -p /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analys
 
 cd /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/scripts
 
-N=$(wc -l < /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexchr.for_genespace_array.csv)
-sbatch --array=1-${N} genespace_to_chicken_array.wholegenome.sh
-# sbatch --array=1-1 genespace_to_chicken_array.wholegenome.onesp.2.sh
+N=$(wc -l < /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexlimited.unique.tsv)
+
+# test
+sbatch --array=1-3 genespace_to_chicken_array.wholegenome.sh
+
+# finish
+sbatch --array=4-${N} genespace_to_chicken_array.wholegenome.sh
+
 ```
 ## Plot just synteny with sex chrom
 ```
@@ -256,9 +255,8 @@ mkdir -p /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analys
 
 cd /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/scripts
 
-N=$(wc -l < /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexchr.for_genespace_array.csv)
+N=$(wc -l < /data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexlimited.for_genespace_array.tsv)
 sbatch --array=1-${N} genespace_to_chicken_array.wholegenome.sexspecific.sh
-# ...Hipposideros_larvatus; 109
 
 ```
 ### Sbatch script
@@ -275,12 +273,11 @@ sbatch --array=1-${N} genespace_to_chicken_array.wholegenome.sexspecific.sh
 
 set -euo pipefail
 
-PAIRFILE=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexchr.for_genespace_array.csv
+PAIRFILE=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/species.sexlimited.for_genespace_array.tsv
 SCRIPT=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/scripts/genespace.synteny_to_chicken.wholegenome.sexspecific.r
 OUTDIR=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/all/plots_sexchr
-SLURM_ARRAY_TASK_ID=20
 
-# Grab the Nth line (array index) and parse "Species Chromosome"
+# Grab the Nth species (array index) and parse "Species Chromosome"
 line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${PAIRFILE}")
 SPECIES=$(awk '{print $1}' <<< "${line}")
 SEXCHR=$(awk '{print $2}' <<< "${line}")
@@ -443,7 +440,19 @@ tree_file <- "/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/r
 
 tr_full <- ape::read.tree(tree_file)
 
-tip_key <- tr_full$tip.label
+tr_full$tip.label[tr_full$tip.label == "Accipiter_gentilis"] <- "Astur_gentilis"
+tr_full$tip.label <- sub("_$", "", tr_full$tip.label)
+
+canis_subspp <- grep("^Canis_lupus_", tr_full$tip.label, value = TRUE)
+if (length(canis_subspp) > 0) {
+  keep_tip <- if ("Canis_lupus_baileyi" %in% canis_subspp) "Canis_lupus_baileyi" else canis_subspp[1]
+  tr_full <- drop.tip(tr_full, setdiff(canis_subspp, keep_tip))
+  tr_full$tip.label[tr_full$tip.label == keep_tip] <- "Canis_lupus"
+}
+stopifnot(!anyDuplicated(tr_full$tip.label))
+
+# species in the table that are not on the tree (fix names if any print)
+setdiff(unique(out$Species), tr_full$tip.label)
 
 tr_ultra <- chronos(tr_full, lambda = 1)
 
@@ -703,8 +712,8 @@ summary_df <- summary_df %>%
     )
   )
 
-write_csv(summary_df, "Gallus_vs_species_window_sums_with_lineage.csv")
-cat("Wrote Gallus_vs_species_window_sums_with_lineage.csv with", nrow(summary_df), "rows\n")
+write_csv(summary_df, "Gallus_vs_species_window_sums_with_lineage.sex_limited.csv")
+cat("Wrote Gallus_vs_species_window_sums_with_lineage.sex_limited.csv with", nrow(summary_df), "rows\n")
 
 
 
@@ -748,7 +757,7 @@ Z_len <- 86044486
 
 to_num <- function(x) suppressWarnings(as.numeric(x))
 
-synteny_plot_df <- df %>%
+synteny_plot_df <- df4 %>%
   # keep Gallus vs non-Gallus
   filter((genome1 == gallus & genome2 != gallus) | (genome2 == gallus & genome1 != gallus)) %>%
   mutate(
@@ -801,7 +810,7 @@ p <- p +
 
 # give the output a touch more vertical room too (optional but helps)
 ggsave(
-  "synteny_to_gallus_Z.png",
+  "synteny_to_gallus_Z.sex_limited.png",
   p,
   width = 10,
   height = max(4, 0.22 * nlevels(synteny_plot_df$Species)), # slightly larger multiplier
@@ -809,5 +818,5 @@ ggsave(
 )
 
 
-ggsave("synteny_to_gallus_Z.png", p, width = 10, height = max(4, 0.2 * nlevels(synteny_plot_df$Species)), dpi = 300)
+ggsave("synteny_to_gallus_Z.sex_limited.png", p, width = 10, height = max(4, 0.2 * nlevels(synteny_plot_df$Species)), dpi = 300)
 ```
