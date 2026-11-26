@@ -3,6 +3,13 @@
 ## Run after SexShared_Syntenic_Blocks.md
 
 # Run genespace with the whole genomes 
+## Make reference list of sex limited chrs
+```
+PROJDIR=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/
+awk -F',' 'NR>1 && $2 ~ /^(Y|W)/ {print $1 "\t" $2}' \
+  ${PROJDIR}/referencelists/sexchrom_accessions.with_gff.csv \
+  > ${PROJDIR}/referencelists/species.sexlimited.for_genespace_array.tsv
+```
 ## Remove X and Z chromosomes from bed files
 ```
 source myconda
@@ -25,11 +32,36 @@ mkdir -p "$OUTBED" "$OUTPEP"
 
 shopt -s nullglob
 
-# 1) Filter BEDs: drop rows where chrom (col 1) is Y*, W*
-for bed in "$INBED"/*.bed; do
-  outbed="${OUTBED}/$(basename "$bed")"
+# 1) Filter BEDs: drop X/Z (by name AND by accession from the CSV), and
+#    rename W/Y accessions to their chromosome name
+SEX_CHR="/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists/sexchrom_accessions.with_gff.csv"
 
-  awk -F'\t' 'BEGIN{OFS="\t"} $1 !~ /^(X[0-9]*|Z[0-9]*)$/ {print}' "$bed" > "$outbed"
+for bed in "$INBED"/*.bed; do
+  sp="$(basename "$bed" .bed)"
+  outbed="${OUTBED}/${sp}.bed"
+
+  # X chromosomes named by number (see SexShared md)
+  extra=""
+  case "$sp" in
+    Narcine_bancroftii)    extra=12 ;;
+    Scyliorhinus_canicula) extra=28 ;;
+  esac
+
+  awk -v sp="$sp" -v extra="$extra" '
+    BEGIN{FS=OFS="\t"; if (extra!="") drop[extra]=1}
+    FNR==NR {
+      split($0, a, ","); gsub(/\r/, "", a[3])
+      if (a[1]==sp) {
+        if (a[2] ~ /^(X|Z)/) { drop[a[2]]=1; if (a[3]!="") drop[a[3]]=1 }
+        else if (a[2] ~ /^(Y|W)/ && a[3]!="" && a[3]!=a[2]) ren[a[3]]=a[2]
+      }
+      next
+    }
+    $1 ~ /^(X[0-9]*|Z[0-9]*)$/ {next}
+    ($1 in drop) {next}
+    { if ($1 in ren) $1=ren[$1]; print }
+  ' "$SEX_CHR" "$bed" > "$outbed"
+
   echo "Wrote $outbed"
 done
 
@@ -57,6 +89,36 @@ for bed in "$OUTBED"/*.bed; do
 done
 
 
+```
+# Make W/Y species lists and check each W/Y is present in its bed
+```
+REFLISTS=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/referencelists
+BASE=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus/genespace_input
+
+# Species, Chr_type, Accession for W/Y rows only
+awk -F',' 'NR>1 && $2 ~ /^(Y|W)/ {gsub(/\r/,"",$3); print $1 "\t" $2 "\t" $3}' \
+  ${REFLISTS}/sexchrom_accessions.with_gff.csv \
+  > ${REFLISTS}/species.sexlimited.all.tsv
+
+# Count genes on each W/Y in the filtered beds
+while IFS=$'\t' read -r SP CHR ACC; do
+  f="${BASE}/usable_beds_noXZ/${SP}.bed"
+  [[ -s "$f" ]] || { printf "%s\t%s\tNO_BED\n" "$SP" "$CHR"; continue; }
+  n=$(awk -v c="$CHR" '$1==c' "$f" | wc -l)
+  printf "%s\t%s\t%s\n" "$SP" "$CHR" "$n"
+done < ${REFLISTS}/species.sexlimited.all.tsv | sort -k3,3n > ${BASE}/WY_gene_counts.tsv
+
+head -40 ${BASE}/WY_gene_counts.tsv   # inspect: 0 / NO_BED = W/Y not in annotated assembly
+
+# Keep only rows with >0 genes on the W/Y -> pair file for plotting (one row per chromosome)
+awk -F'\t' '$3 ~ /^[0-9]+$/ && $3 > 0 {print $1 "\t" $2}' ${BASE}/WY_gene_counts.tsv \
+  > ${REFLISTS}/species.sexlimited.for_genespace_array.tsv
+
+# Unique species -> list for the GENESPACE runs (one job per species, avoids two jobs in one WORKDIR)
+cut -f1 ${REFLISTS}/species.sexlimited.for_genespace_array.tsv | sort -u \
+  > ${REFLISTS}/species.sexlimited.unique.txt
+
+wc -l ${REFLISTS}/species.sexlimited.for_genespace_array.tsv ${REFLISTS}/species.sexlimited.unique.txt
 ```
 # Create requisite genespace directory structure
 ```
@@ -87,13 +149,43 @@ tail -n +2 "$SEX_CHR" | while IFS=',' read -r SPECIES CHR_TYPE ACC; do
   ln -sf "$REF_PEP" "${SPECIES}/peptide/Gallus_gallus_REF.fa"
 done
 
-
 ```
-# Confirm contigs but not scaffolds are kept
+# Confirm contigs but not scaffolds are kept; confirm X/Z removed
 ```
 awk '{print $1}' Buteo_buteo/bed/Buteo_buteo.bed | sort -u 
 awk '{print $1}' Buteo_buteo/bed/Gallus_gallus_REF.bed | sort -u 
 
+grep -cE '^(X|Z)[0-9]*\b' Buteo_buteo/bed/Buteo_buteo.bed   # expect 0
+
+```
+# Set up the scripts directory from the GitHub repo
+```
+YW=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/analyses/Genespace/YW_Synteny_Gallus_gallus
+REPO=/data/Wilson_Lab/projects/VGP_Phase_1_Sex_Chr_Project/jacksondan/scripts/VGP_Phase1_Neo_Sex
+
+mkdir -p ${YW}/scripts/slurm_output ${YW}/all/plots/slurm_output ${YW}/all/plots_sexchr/slurm_output
+mkdir -p "$(dirname ${REPO})"
+
+# clone once; afterwards just pull
+if [[ -d ${REPO}/.git ]]; then
+  git -C ${REPO} pull --ff-only
+else
+  git clone https://github.com/dannyjackson/VGP_Phase1_Neo_Sex.git ${REPO}
+fi
+
+# record which commit this run used
+git -C ${REPO} rev-parse HEAD > ${YW}/scripts/repo_commit.txt
+cat ${YW}/scripts/repo_commit.txt
+
+# link the R scripts into the scripts dir (sbatch SCRIPT= paths stay unchanged)
+ln -sf ${REPO}/2_Synteny_Analyses/genespace.synteny_to_chicken.wholegenome.r \
+       ${YW}/scripts/genespace.synteny_to_chicken.wholegenome.r
+ln -sf ${REPO}/2_Synteny_Analyses/genespace.synteny_to_chicken.wholegenome.sexspecific.r \
+       ${YW}/scripts/genespace.synteny_to_chicken.wholegenome.sexspecific.r
+
+# confirm the Part A edits are present in the clone
+grep -n 'png_name <-' ${YW}/scripts/genespace.synteny_to_chicken.wholegenome.r     # expect a match
+grep -n '\.38\.pdf'   ${YW}/scripts/genespace.synteny_to_chicken.wholegenome.sexspecific.r  # expect no match
 ```
 # Submission script
 ```

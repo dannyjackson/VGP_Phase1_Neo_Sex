@@ -64,7 +64,7 @@ ripDat <- plot_riparian(
 p_list <- ripDat$plot
 p <- p_list[[1]]
 
-pdf_name <- file.path(OUTDIR, sprintf("%s.Gallus_gallus.5x3.%s.38.pdf", SPECIES_ID, SEXCHR))
+pdf_name <- file.path(OUTDIR, sprintf("%s.Gallus_gallus.5x3.%s.pdf", SPECIES_ID, SEXCHR))
 
 ggsave(
   filename = pdf_name,

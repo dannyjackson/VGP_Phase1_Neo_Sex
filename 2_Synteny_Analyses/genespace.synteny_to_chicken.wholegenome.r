@@ -26,6 +26,7 @@ dir.create(OUTDIR, recursive = TRUE, showWarnings = FALSE)
 
 gpar <- init_genespace(
   wd = wd,
+  blkSize = as.integer(Sys.getenv("GS_BLKSIZE", "5")),
   path2mcscanx = "/vf/users/jacksondan/conda/envs/genespace/bin/"
 )
 
@@ -72,10 +73,10 @@ ggsave(
 
 message("Wrote: ", pdf_name)
 
-pdf_name <- file.path(OUTDIR, sprintf("%s.Gallus_gallus.5x3.wholegenome.png", SPECIES_ID))
+png_name <- file.path(OUTDIR, sprintf("%s.Gallus_gallus.5x3.wholegenome.png", SPECIES_ID))
 
 ggsave(
-  filename = pdf_name,
+  filename = png_name,
   plot = p,
   width = 5,
   height = 3,
